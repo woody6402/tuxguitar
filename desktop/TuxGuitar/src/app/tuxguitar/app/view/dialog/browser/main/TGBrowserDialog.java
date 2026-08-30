@@ -1,10 +1,13 @@
 package app.tuxguitar.app.view.dialog.browser.main;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.net.URLConnection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -19,6 +22,8 @@ import app.tuxguitar.app.tools.browser.TGBrowserConnection;
 import app.tuxguitar.app.tools.browser.TGBrowserConnectionHandler;
 import app.tuxguitar.app.tools.browser.TGBrowserFactoryListener;
 import app.tuxguitar.app.tools.browser.TGBrowserManager;
+import app.tuxguitar.app.tools.browser.TGBrowserRatingEntry;
+import app.tuxguitar.app.tools.browser.TGBrowserRatingStore;
 import app.tuxguitar.app.tools.browser.base.TGBrowser;
 import app.tuxguitar.app.tools.browser.base.TGBrowserElement;
 import app.tuxguitar.app.tools.browser.base.TGBrowserFactory;
@@ -42,6 +47,8 @@ import app.tuxguitar.ui.event.UIModifyEvent;
 import app.tuxguitar.ui.event.UIModifyListener;
 import app.tuxguitar.ui.event.UIMouseDoubleClickListener;
 import app.tuxguitar.ui.event.UIMouseEvent;
+import app.tuxguitar.ui.event.UISelectionEvent;
+import app.tuxguitar.ui.event.UISelectionListener;
 import app.tuxguitar.ui.layout.UITableLayout;
 import app.tuxguitar.ui.resource.UICursor;
 import app.tuxguitar.ui.resource.UIRectangle;
@@ -68,11 +75,13 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 	private TGContext context;
 	private TGBrowserCollection collection;
 	private TGBrowserConnection connection;
+	private TGBrowserRatingStore ratingStore;
 	private UIWindow dialog;
 	private UIPanel searchPanel;
 	private UILabel searchLabel;
 	private UITextField searchText;
 	private volatile String searchQuery;
+	private boolean ratingView;
 	private UITable<TGBrowserElement> table;
 	private List<TGBrowserElement> elements;
 	private TGBrowserMenuBar menu;
@@ -82,7 +91,9 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 	public TGBrowserDialog(TGContext context){
 		this.context = context;
 		this.searchQuery = "";
+		this.ratingView = false;
 		this.connection = new TGBrowserConnection(context, this);
+		this.ratingStore = new TGBrowserRatingStore();
 		this.menu = new TGBrowserMenuBar(this);
 		this.toolBar = new TGBrowserToolBar(this);
 	}
@@ -170,7 +181,7 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 		this.searchText.addModifyListener(new UIModifyListener() {
 			public void onModify(UIModifyEvent event) {
 				searchQuery = searchText.getText().trim();
-				if (getConnection().isSearchSupported()) {
+				if (!isRatingView() && getConnection().isSearchSupported()) {
 					listElements();
 				} else {
 					updateTable();
@@ -189,6 +200,29 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 				openElement();
 			}
 		});
+		this.table.addSelectionListener(new UISelectionListener() {
+			public void onSelect(UISelectionEvent event) {
+				toolBar.updateRatingItem();
+			}
+		});
+	}
+
+	public TGBrowserElement getSelectedElement() {
+		return (this.table != null ? this.table.getSelectedValue() : null);
+	}
+
+	public TGBrowserRatingStore getRatingStore() {
+		return this.ratingStore;
+	}
+
+	public boolean isRatingView() {
+		return this.ratingView;
+	}
+
+	public void toggleRatingView() {
+		this.ratingView = !this.ratingView;
+		this.updateTable();
+		this.updateBars();
 	}
 
 	public boolean isDisposed(){
@@ -206,11 +240,14 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 			TGSynchronizer.getInstance(this.context).executeLater(new Runnable() {
 				public void run() {
 					if(!isDisposed()){
+						TGBrowserElement selectedElement = TGBrowserDialog.this.table.getSelectedValue();
 						TGBrowserDialog.this.table.removeItems();
-						if( TGBrowserDialog.this.elements != null ){
-							Iterator<TGBrowserElement> it = TGBrowserDialog.this.elements.iterator();
+						List<TGBrowserElement> visibleElements = (isRatingView()
+								? getRatingStore().getRatings(getCollection()) : TGBrowserDialog.this.elements);
+						if( visibleElements != null ){
+							Iterator<TGBrowserElement> it = visibleElements.iterator();
 							String searchQuery = getSearchQuery().toLowerCase(Locale.ROOT);
-							boolean applyLocalFilter = !getConnection().isSearchSupported();
+							boolean applyLocalFilter = isRatingView() || !getConnection().isSearchSupported();
 							while(it.hasNext()){
 								TGBrowserElement element = it.next();
 								if (applyLocalFilter && searchQuery.length() > 0
@@ -221,13 +258,22 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 
 								UITableItem<TGBrowserElement> item = new UITableItem<TGBrowserElement>(element);
 								item.setImage(element.isFolder() ? iconManager.getBrowserFolder(): iconManager.getBrowserFile());
-								item.setText(0, element.getName());
+								int rating = (!element.isFolder()
+										? getRatingStore().getRating(getCollection(), element) : 0);
+								String ratingPrefix = (!element.isFolder()
+										? (rating > 0 ? "★" + rating : "☆–") + "  " : "    ");
+								item.setText(0, ratingPrefix + element.getName());
 								TGBrowserDialog.this.table.addItem(item);
 							}
+							getRatingStore().flush();
+						}
+						if (selectedElement != null) {
+							TGBrowserDialog.this.table.setSelectedValue(selectedElement);
 						}
 						// theoretically useless
 						// workaround for a non explained issue in Linux/SWT configuration
 						// see https://github.com/helge17/tuxguitar/issues/791
+						TGBrowserDialog.this.toolBar.updateRatingItem();
 						TGBrowserDialog.this.dialog.layout();
 					}
 				}
@@ -383,6 +429,10 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 
 	public void openStream(final TGBrowserElement element) {
 		if(!this.isDisposed()) {
+			if (element instanceof TGBrowserRatingEntry) {
+				this.openRatingStream((TGBrowserRatingEntry) element);
+				return;
+			}
 			this.getConnection().openStream(new TGAbstractBrowserCallBack<InputStream>() {
 				public void onSuccess(InputStream stream) {
 					onOpenStream(stream, element);
@@ -393,6 +443,32 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 				}
 			}, element);
 		}
+	}
+
+	private void openRatingStream(final TGBrowserRatingEntry element) {
+		loadCursor(UICursor.WAIT);
+		new Thread(new Runnable() {
+			public void run() {
+				try {
+					String path = element.getPath();
+					InputStream stream;
+					File file = new File(path);
+					if (file.isAbsolute()) {
+						stream = new FileInputStream(file);
+					} else {
+						URLConnection connection = URI.create(path).toURL().openConnection();
+						connection.setConnectTimeout(10000);
+						connection.setReadTimeout(30000);
+						connection.setRequestProperty("User-Agent", "TuxGuitar Collection Browser");
+						stream = TGFileFormatUtils.getInputStream(connection.getInputStream());
+					}
+					onOpenStream(stream, element);
+				} catch (Throwable throwable) {
+					loadCursor(UICursor.NORMAL);
+					notifyError(throwable);
+				}
+			}
+		}, "tuxguitar-browser-rating-open").start();
 	}
 
 	public void openElement() {
