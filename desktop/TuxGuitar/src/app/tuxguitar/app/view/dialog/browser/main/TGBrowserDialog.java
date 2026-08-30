@@ -7,6 +7,7 @@ import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 
 import app.tuxguitar.app.TuxGuitar;
 import app.tuxguitar.app.document.TGDocumentListAttributes;
@@ -37,14 +38,19 @@ import app.tuxguitar.tools.browser.base.TGBrowserCallBack;
 import app.tuxguitar.ui.UIFactory;
 import app.tuxguitar.ui.event.UIDisposeEvent;
 import app.tuxguitar.ui.event.UIDisposeListener;
+import app.tuxguitar.ui.event.UIModifyEvent;
+import app.tuxguitar.ui.event.UIModifyListener;
 import app.tuxguitar.ui.event.UIMouseDoubleClickListener;
 import app.tuxguitar.ui.event.UIMouseEvent;
 import app.tuxguitar.ui.layout.UITableLayout;
 import app.tuxguitar.ui.resource.UICursor;
 import app.tuxguitar.ui.resource.UIRectangle;
 import app.tuxguitar.ui.widget.UIContainer;
+import app.tuxguitar.ui.widget.UILabel;
+import app.tuxguitar.ui.widget.UIPanel;
 import app.tuxguitar.ui.widget.UITable;
 import app.tuxguitar.ui.widget.UITableItem;
+import app.tuxguitar.ui.widget.UITextField;
 import app.tuxguitar.ui.widget.UIWindow;
 import app.tuxguitar.util.TGContext;
 import app.tuxguitar.util.TGException;
@@ -63,6 +69,10 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 	private TGBrowserCollection collection;
 	private TGBrowserConnection connection;
 	private UIWindow dialog;
+	private UIPanel searchPanel;
+	private UILabel searchLabel;
+	private UITextField searchText;
+	private volatile String searchQuery;
 	private UITable<TGBrowserElement> table;
 	private List<TGBrowserElement> elements;
 	private TGBrowserMenuBar menu;
@@ -71,6 +81,7 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 
 	public TGBrowserDialog(TGContext context){
 		this.context = context;
+		this.searchQuery = "";
 		this.connection = new TGBrowserConnection(context, this);
 		this.menu = new TGBrowserMenuBar(this);
 		this.toolBar = new TGBrowserToolBar(this);
@@ -113,6 +124,7 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 
 		this.menu.createMenuBar(getWindow());
 		this.toolBar.createToolBar(getWindow());
+		this.initSearch(this.dialog);
 		this.initTable(this.dialog);
 		this.createLayout();
 
@@ -138,11 +150,35 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 	public void createLayout() {
 		UITableLayout uiLayout = new UITableLayout();
 		uiLayout.set(this.toolBar.getControl(), 1, 1, UITableLayout.ALIGN_FILL, UITableLayout.ALIGN_TOP, true, false, 1, 1, null, null, 0f);
-		uiLayout.set(this.table, 2, 1, UITableLayout.ALIGN_FILL, UITableLayout.ALIGN_FILL, true, true, 1, 1, null, null, 0f);
+		uiLayout.set(this.searchPanel, 2, 1, UITableLayout.ALIGN_FILL, UITableLayout.ALIGN_TOP, true, false, 1, 1, null, null, 0f);
+		uiLayout.set(this.table, 3, 1, UITableLayout.ALIGN_FILL, UITableLayout.ALIGN_FILL, true, true, 1, 1, null, null, 0f);
 		uiLayout.set(this.table, UITableLayout.PACKED_WIDTH, 10f);
 		uiLayout.set(this.table, UITableLayout.PACKED_HEIGHT, 10f);
 
 		this.dialog.setLayout(uiLayout);
+	}
+
+	public void initSearch(UIContainer parent) {
+		UITableLayout searchLayout = new UITableLayout();
+		this.searchPanel = getUIFactory().createPanel(parent, false);
+		this.searchPanel.setLayout(searchLayout);
+
+		this.searchLabel = getUIFactory().createLabel(this.searchPanel);
+		searchLayout.set(this.searchLabel, 1, 1, UITableLayout.ALIGN_LEFT, UITableLayout.ALIGN_CENTER, false, false);
+
+		this.searchText = getUIFactory().createTextField(this.searchPanel);
+		this.searchText.addModifyListener(new UIModifyListener() {
+			public void onModify(UIModifyEvent event) {
+				searchQuery = searchText.getText().trim();
+				if (getConnection().isSearchSupported()) {
+					listElements();
+				} else {
+					updateTable();
+				}
+			}
+		});
+		searchLayout.set(this.searchText, 1, 2, UITableLayout.ALIGN_FILL, UITableLayout.ALIGN_CENTER, true, false,
+				1, 1, 250f, null, null);
 	}
 
 	public void initTable(UIContainer parent){
@@ -173,8 +209,14 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 						TGBrowserDialog.this.table.removeItems();
 						if( TGBrowserDialog.this.elements != null ){
 							Iterator<TGBrowserElement> it = TGBrowserDialog.this.elements.iterator();
+							String searchQuery = getSearchQuery().toLowerCase(Locale.ROOT);
+							boolean applyLocalFilter = !getConnection().isSearchSupported();
 							while(it.hasNext()){
 								TGBrowserElement element = it.next();
+								if (applyLocalFilter && searchQuery.length() > 0
+										&& !element.getName().toLowerCase(Locale.ROOT).contains(searchQuery)) {
+									continue;
+								}
 								TGIconManager iconManager = TGIconManager.getInstance(TGBrowserDialog.this.context);
 
 								UITableItem<TGBrowserElement> item = new UITableItem<TGBrowserElement>(element);
@@ -318,12 +360,25 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 
 	public void listElements() {
 		if(!this.isDisposed()) {
-			this.getConnection().listElements(new TGAbstractBrowserCallBack<List<TGBrowserElement>>() {
+			final String query = getSearchQuery();
+			TGBrowserCallBack<List<TGBrowserElement>> callback = new TGAbstractBrowserCallBack<List<TGBrowserElement>>() {
 				public void onSuccess(List<TGBrowserElement> elements) {
 					notifyElements(elements);
+					if (!query.equals(getSearchQuery())) {
+						listElements();
+					}
 				}
-			});
+			};
+			if (query.length() > 0 && this.getConnection().isSearchSupported()) {
+				this.getConnection().searchElements(callback, query);
+			} else {
+				this.getConnection().listElements(callback);
+			}
 		}
+	}
+
+	private String getSearchQuery() {
+		return this.searchQuery;
 	}
 
 	public void openStream(final TGBrowserElement element) {
@@ -426,6 +481,7 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 	public void loadProperties() {
 		if(!isDisposed()){
 			this.dialog.setText(TuxGuitar.getProperty("browser.dialog"));
+			this.searchLabel.setText(TuxGuitar.getProperty("browser.search"));
 			this.menu.loadProperties();
 			this.toolBar.loadProperties();
 		}

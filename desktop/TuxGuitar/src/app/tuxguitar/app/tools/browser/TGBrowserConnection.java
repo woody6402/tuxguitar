@@ -1,6 +1,8 @@
 package app.tuxguitar.app.tools.browser;
 
 import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.List;
 
 import app.tuxguitar.app.tools.browser.base.TGBrowser;
@@ -14,6 +16,7 @@ public class TGBrowserConnection {
 	private boolean locked;
 	private TGLock lock;
 	private TGBrowser browser;
+	private Method searchMethod;
 	private TGBrowserConnectionHandler handler;
 
 	public TGBrowserConnection(TGContext context, TGBrowserConnectionHandler handler){
@@ -89,6 +92,20 @@ public class TGBrowserConnection {
 		}
 	}
 
+	public boolean isSearchSupported() {
+		return (this.searchMethod != null);
+	}
+
+	public void searchElements(final TGBrowserCallBack<List<TGBrowserElement>> callback, final String query){
+		if( tryLock()) {
+			new Thread(new Runnable() {
+				public void run() {
+					internalSearchElements(new TGBrowserCallBackUnlockWrapper<List<TGBrowserElement>>(callback), query);
+				}
+			}).start();
+		}
+	}
+
 	public void openStream(final TGBrowserCallBack<InputStream> callback, final TGBrowserElement element) {
 		if( tryLock()) {
 			new Thread(new Runnable() {
@@ -157,6 +174,20 @@ public class TGBrowserConnection {
 		}
 	}
 
+	private void internalSearchElements(final TGBrowserCallBack<List<TGBrowserElement>> callback, String query){
+		if( this.browser != null && this.searchMethod != null ){
+			try {
+				this.searchMethod.invoke(this.browser, callback, query);
+			} catch (InvocationTargetException e) {
+				callback.handleError(e.getCause() != null ? e.getCause() : e);
+			} catch (Throwable throwable) {
+				callback.handleError(throwable);
+			}
+		} else {
+			callback.onSuccess(null);
+		}
+	}
+
 	private void internalOpenStream(TGBrowserCallBack<InputStream> callback, TGBrowserElement element){
 		if( this.isOpen() && element != null && !element.isFolder() ){
 			this.getBrowser().getInputStream(callback, element);
@@ -195,6 +226,14 @@ public class TGBrowserConnection {
 
 	private void setBrowser(TGBrowser browser) {
 		this.browser = browser;
+		this.searchMethod = null;
+		if (browser != null) {
+			try {
+				this.searchMethod = browser.getClass().getMethod("searchElements", TGBrowserCallBack.class, String.class);
+			} catch (NoSuchMethodException e) {
+				// Search is an optional browser capability.
+			}
+		}
 	}
 
 	private class TGBrowserCallBackWrapper<T> implements TGBrowserCallBack<T> {
