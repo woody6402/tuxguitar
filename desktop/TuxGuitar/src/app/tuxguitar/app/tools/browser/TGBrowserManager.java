@@ -63,16 +63,6 @@ public class TGBrowserManager {
 
 	public void removeFactory(TGBrowserFactory factory){
 		this.factories.remove(factory);
-
-		int index = 0;
-		while(index < this.collections.size()){
-			TGBrowserCollection collection = this.collections.get(index);
-			if(collection.getType().equals(factory.getType())){
-				removeCollection(collection);
-				continue;
-			}
-			index ++;
-		}
 		if(this.handler != null){
 			this.handler.notifyRemoved();
 		}

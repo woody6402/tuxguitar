@@ -35,6 +35,8 @@ import app.tuxguitar.io.base.TGFileFormatUtils;
 import app.tuxguitar.tools.browser.TGBrowserCollection;
 import app.tuxguitar.tools.browser.base.TGBrowserCallBack;
 import app.tuxguitar.ui.UIFactory;
+import app.tuxguitar.ui.event.UICloseEvent;
+import app.tuxguitar.ui.event.UICloseListener;
 import app.tuxguitar.ui.event.UIDisposeEvent;
 import app.tuxguitar.ui.event.UIDisposeListener;
 import app.tuxguitar.ui.event.UIMouseDoubleClickListener;
@@ -105,6 +107,12 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 	}
 
 	public void show() {
+		if (!this.isDisposed()) {
+			this.dialog.setVisible(true);
+			this.dialog.moveToTop();
+			return;
+		}
+
 		this.collection = null;
 		this.elements = null;
 
@@ -120,6 +128,11 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 		this.updateTable();
 
 		this.dialog.setBounds(new UIRectangle(0, 0, SHELL_WIDTH,SHELL_HEIGHT));
+		this.dialog.addCloseListener(new UICloseListener() {
+			public void onClose(UICloseEvent event) {
+				dispose();
+			}
+		});
 		this.dialog.addDisposeListener(new UIDisposeListener() {
 			public void onDispose(UIDisposeEvent event) {
 				exit();
@@ -161,8 +174,12 @@ public class TGBrowserDialog implements TGBrowserFactoryListener, TGBrowserConne
 
 	public void dispose(){
 		if(!isDisposed()){
-			this.dialog.dispose();
+			this.dialog.setVisible(false);
 		}
+	}
+
+	public boolean isVisible() {
+		return (!this.isDisposed() && this.dialog.isVisible());
 	}
 
 	public void updateTable(){
