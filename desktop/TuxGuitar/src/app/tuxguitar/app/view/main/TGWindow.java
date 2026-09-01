@@ -14,6 +14,8 @@ import app.tuxguitar.app.view.dialog.fretboard.TGFretBoardEditor;
 import app.tuxguitar.app.view.toolbar.edit.TGEditToolBar;
 import app.tuxguitar.app.view.toolbar.main.TGMainToolBar;
 import app.tuxguitar.app.view.util.TGCursorController;
+import app.tuxguitar.editor.TGEditorManager;
+import app.tuxguitar.editor.event.TGUpdateEvent;
 import app.tuxguitar.editor.util.TGSyncProcess;
 import app.tuxguitar.event.TGEvent;
 import app.tuxguitar.event.TGEventListener;
@@ -132,6 +134,7 @@ public class TGWindow implements TGEventListener {
 	private void createShellListeners() {
 		TGSkinManager tgSkinManager = TGSkinManager.getInstance(this.context);
 		tgSkinManager.addLoader(this);
+		TGEditorManager.getInstance(this.context).addUpdateListener(this);
 	}
 
 	public void loadDefaultCursor() {
@@ -198,6 +201,11 @@ public class TGWindow implements TGEventListener {
 			public void run() {
 				if( TGSkinEvent.EVENT_TYPE.equals(event.getEventType()) ) {
 					loadIcons();
+				}
+				else if( TGUpdateEvent.EVENT_TYPE.equals(event.getEventType())
+						&& TGUpdateEvent.SONG_LOADED == ((Integer) event.getAttribute(TGUpdateEvent.PROPERTY_UPDATE_MODE)).intValue()
+						&& !isDisposed() ) {
+					getWindow().layout();
 				}
 			}
 		});
