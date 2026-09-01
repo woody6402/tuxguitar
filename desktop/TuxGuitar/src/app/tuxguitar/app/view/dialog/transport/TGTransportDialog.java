@@ -473,7 +473,7 @@ public class TGTransportDialog implements TGEventListener {
 				long time = System.currentTimeMillis();
 				if (time > this.redrawTime + PLAY_MODE_DELAY) {
 					long position = (transportCache.getPlayStart()
-							+ (player.getTickPosition() - transportCache.getPlayTick()));
+							+ (transportCache.getDisplayTickPosition() - transportCache.getPlayTick()));
 					this.updateTickLabel(Long.toString(position));
 					this.tickProgress.setValue((int) position);
 					this.redrawTime = time;
