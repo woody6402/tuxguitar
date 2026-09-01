@@ -9,6 +9,7 @@ import app.tuxguitar.app.action.impl.transport.TGTransportStopAction;
 import app.tuxguitar.app.system.icons.TGIconManager;
 import app.tuxguitar.app.view.component.tab.Tablature;
 import app.tuxguitar.app.view.component.tab.TablatureEditor;
+import app.tuxguitar.app.view.dialog.transport.TGTransportDisplayDelayDialog;
 import app.tuxguitar.editor.action.transport.TGTransportCountDownAction;
 import app.tuxguitar.editor.action.transport.TGTransportMetronomeAction;
 import app.tuxguitar.graphics.control.TGLayout;
@@ -21,6 +22,8 @@ import app.tuxguitar.ui.menu.UIMenu;
 import app.tuxguitar.ui.menu.UIMenuActionItem;
 import app.tuxguitar.ui.menu.UIMenuCheckableItem;
 import app.tuxguitar.ui.menu.UIMenuSubMenuItem;
+import app.tuxguitar.ui.event.UISelectionEvent;
+import app.tuxguitar.ui.event.UISelectionListener;
 
 public class TransportMenuItem extends TGMenuItem {
 
@@ -35,6 +38,7 @@ public class TransportMenuItem extends TGMenuItem {
 	private UIMenuCheckableItem loopEHeader;
 	private UIMenuCheckableItem highlightPlayedBeat;
 	private UIMenuCheckableItem continuousScrolling;
+	private UIMenuActionItem displayDelay;
 
 	private boolean isRunning;
 
@@ -85,6 +89,12 @@ public class TransportMenuItem extends TGMenuItem {
 		this.highlightPlayedBeat.addSelectionListener(this.createActionProcessor(TGToggleHighlightPlayedBeatAction.NAME));
 		this.continuousScrolling = this.transportMenuItem.getMenu().createCheckItem();
 		this.continuousScrolling.addSelectionListener(this.createActionProcessor(TGToggleContinuousScrollingAction.NAME));
+		this.displayDelay = this.transportMenuItem.getMenu().createActionItem();
+		this.displayDelay.addSelectionListener(new UISelectionListener() {
+			public void onSelect(UISelectionEvent event) {
+				new TGTransportDisplayDelayDialog().show(findContext());
+			}
+		});
 
 		this.isRunning = false;
 		this.loadIcons();
@@ -107,6 +117,7 @@ public class TransportMenuItem extends TGMenuItem {
 		this.highlightPlayedBeat.setChecked( (style & TGLayout.HIGHLIGHT_PLAYED_BEAT) != 0 );
 		this.continuousScrolling.setEnabled(!running);
 		this.continuousScrolling.setChecked( (style & TGLayout.CONTINUOUS_SCROLL) != 0 );
+		this.loadDisplayDelayText();
 		this.loadIcons(false);
 		this.play.setText(TuxGuitar.getProperty(isRunning ? "transport.pause" : "transport.start"));
 	}
@@ -122,6 +133,13 @@ public class TransportMenuItem extends TGMenuItem {
 		setMenuItemTextAndAccelerator(this.loopEHeader, "transport.set-loop-end", TGTransportSetLoopEHeaderAction.NAME);
 		setMenuItemTextAndAccelerator(this.highlightPlayedBeat, "transport.highlight-played-beat", TGToggleHighlightPlayedBeatAction.NAME);
 		setMenuItemTextAndAccelerator(this.continuousScrolling, "transport.continuous-scrolling", TGToggleContinuousScrollingAction.NAME);
+		this.loadDisplayDelayText();
+	}
+
+	private void loadDisplayDelayText() {
+		int value = app.tuxguitar.app.transport.TGTransport.getInstance(this.findContext()).getCache()
+				.getDisplayDelayMillis();
+		this.displayDelay.setText(TuxGuitar.getProperty("transport.display-delay") + "... (" + value + " ms)");
 	}
 
 	public void loadIcons(){
@@ -133,6 +151,7 @@ public class TransportMenuItem extends TGMenuItem {
 		this.loopEHeader.setImage(TuxGuitar.getInstance().getIconManager().getImageByName(TGIconManager.TRANSPORT_LOOP_END));
 		this.highlightPlayedBeat.setImage(TuxGuitar.getInstance().getIconManager().getImageByName(TGIconManager.TRANSPORT_HIGHLIGHT_PLAYED_BEAT));
 		this.continuousScrolling.setImage(TuxGuitar.getInstance().getIconManager().getImageByName(TGIconManager.TRANSPORT_CONTINUOUS_SCROLLING));
+		this.displayDelay.setImage(TuxGuitar.getInstance().getIconManager().getImageByName(TGIconManager.TRANSPORT_TIME_COUNTER));
 	}
 
 	public void loadIcons(boolean force){

@@ -12,6 +12,7 @@ import app.tuxguitar.song.models.TGBeat;
 import app.tuxguitar.song.models.TGDuration;
 import app.tuxguitar.song.models.TGMeasure;
 import app.tuxguitar.song.models.TGTrack;
+import app.tuxguitar.song.models.TGTempo;
 import app.tuxguitar.util.TGContext;
 
 public class TGTransportCache {
@@ -25,12 +26,38 @@ public class TGTransportCache {
 	private long playBeatEnd;
 	private boolean playChanges;
 	private boolean playUpdate;
+	private int displayDelayMillis;
 	private TGBeatImpl playBeat;
 	private TGMeasureImpl playMeasure;
 
 	public TGTransportCache(TGContext context){
 		this.context = context;
+		this.displayDelayMillis = 0;
 		this.reset();
+	}
+
+	public int getDisplayDelayMillis() {
+		return this.displayDelayMillis;
+	}
+
+	public void setDisplayDelayMillis(int displayDelayMillis) {
+		int value = Math.max(-5000, Math.min(5000, displayDelayMillis));
+		if (this.displayDelayMillis != value) {
+			this.displayDelayMillis = value;
+			this.reset();
+		}
+	}
+
+	public long getDisplayTickPosition() {
+		MidiPlayer player = MidiPlayer.getInstance(this.context);
+		long tick = player.getTickPosition();
+		TGTempo tempo = player.getCurrentTempo();
+		if (this.displayDelayMillis == 0 || tempo == null) {
+			return tick;
+		}
+		long effectiveTempo = ((long) tempo.getQuarterValue() * player.getMode().getCurrentPercent()) / 100L;
+		long delayTicks = (this.displayDelayMillis * effectiveTempo * TGDuration.QUARTER_TIME) / 60000L;
+		return Math.max(0, tick - delayTicks);
 	}
 
 	public void reset() {
@@ -59,7 +86,7 @@ public class TGTransportCache {
 				Caret caret = TablatureEditor.getInstance(this.context).getTablature().getCaret();
 				TGTrack track = caret.getTrack();
 
-				long tick = player.getTickPosition();
+				long tick = this.getDisplayTickPosition();
 				long start = this.playStart + (tick - this.playTick);
 				if( this.playMeasure == null || start < this.playMeasure.getStart() || start > (this.playMeasure.getStart() + this.playMeasure.getLength()) ){
 					this.playMeasure = null;
