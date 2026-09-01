@@ -7,7 +7,7 @@ public class TGBrowserDialogController implements TGToggleViewController {
 
 	public void toggleView(TGViewContext context) {
 		TGBrowserDialog dialog = TGBrowserDialog.getInstance(context.getContext());
-		if( dialog.isDisposed()){
+		if( !dialog.isVisible()){
 			dialog.show();
 		} else {
 			dialog.dispose();
