@@ -1,5 +1,34 @@
 # TuxGuitar
 
+## Feature branches
+
+  - feature/browser-main
+      - Adds optional search to the Collection Browser.
+      - Adds persistent star ratings for files.
+      - Adds a filter for showing rated files.
+
+  - feature/browser-keep-open
+      - Hides the Collection Browser instead of disposing it.
+      - Preserves the currently opened collection while the application is running.
+      - Prevents saved collections from being removed when a browser provider is unloaded.
+
+  - feature/page-up-down
+      - Adds Page Up and Page Down scrolling actions.
+      - Includes default keyboard shortcuts.
+      - Scrolls the score view by approximately one visible page.
+
+  - feature/playback-delay
+      - Adds a configurable visual playback delay from -5000 to +5000 milliseconds.
+      - Delays or advances the played-beat highlight and transport position.
+      - Uses 0 ms to disable the adjustment.
+      - Adds the setting under the Player menu.
+
+  - fix/main-window-resize-overflow
+      - Prevents the tablature and other child controls from overflowing the main window after resizing.
+      - Recalculates the main-window layout after a song is loaded.
+      - Ensures score wrapping follows the visible window width.
+
+
 ## Description
 
 TuxGuitar is an open source multitrack tablature editor and player written in Java.
