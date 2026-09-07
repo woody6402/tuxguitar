@@ -1,6 +1,10 @@
 # TuxGuitar
 
-my personal fork to add some updates which will not be part of the upstream master project.
+my personal fork to add some updates which will not be part of the upstream master project:
+- collection browser search
+- colletcion browser favorites
+- page up/down
+- horizontal tab line overflow 
 
 ## Description
 
