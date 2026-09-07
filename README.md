@@ -1,5 +1,7 @@
 # TuxGuitar
 
+my personal fork to add some updates which will not be part of the upstream master project.
+
 ## Description
 
 TuxGuitar is an open source multitrack tablature editor and player written in Java.
