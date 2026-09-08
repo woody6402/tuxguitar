@@ -13,6 +13,6 @@ public class TGScrollPageUpAction extends TGActionBase {
 	}
 
 	protected void processAction(TGActionContext context) {
-		TGMoveCaretToAdjacentLine.process(getContext(), context, -1);
+		TGMoveCaretToAdjacentLine.processPage(getContext(), context, -1);
 	}
 }
