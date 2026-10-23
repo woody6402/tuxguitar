@@ -30,7 +30,7 @@ import app.tuxguitar.util.TGVersion;
 
 public class TGAboutDialog {
 
-	private static final String RELEASE_NAME = (TGApplication.NAME + " " + TGVersion.CURRENT.getVersion());
+	private static final String RELEASE_NAME = (TGApplication.NAME + " 2.1.1-woody64");
 	private static final String PROPERTY_PREFIX = ("help.about.");
 
 	private static final float IMAGE_WIDTH = 100;

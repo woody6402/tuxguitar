@@ -42,7 +42,7 @@ android {
 		multiDexEnabled true
 		// Format:  yyMMddHH
 		versionCode 26102300
-		versionName "2.1.1"
+		versionName "2.1.1-woody64"
 	}
 
 	buildTypes {
