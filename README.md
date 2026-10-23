@@ -62,3 +62,26 @@ TuxGuitar includes the following third party products:
 * Gervill (Java Software Synthesizer)
 * iText (Free Java-PDF library): https://itextpdf.com/
 * Magic Sound Font v2.0 - Contributed by Dennis Deutschmann
+
+## Local build with external plugins
+
+The `ascii-import` and `browser-web` plugins are maintained in separate Git repositories. Clone them into the paths expected by the desktop build:
+
+```bash
+git clone git@github.com:woody6402/tuxguitar-ascii-import.git common/TuxGuitar-ascii-import
+git clone git@github.com:woody6402/tuxguitar-browser-web.git desktop/TuxGuitar-browser-web
+```
+
+For a reproducible build, use these commits:
+
+```text
+ascii-import: a4faf2f
+browser-web:  da7b9bf
+```
+
+Then build the Linux SWT package with:
+
+```bash
+cd desktop/build-scripts/tuxguitar-linux-swt
+mvn -e package -P native-modules -Dmaven.test.skip=true
+```
