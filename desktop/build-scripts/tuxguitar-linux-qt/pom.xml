@@ -48,10 +48,12 @@
 		<module>../../TuxGuitar-tef</module>
 		<module>../../TuxGuitar-tuner</module>
 		<module>../../TuxGuitar-svg</module>
+		<module>../../TuxGuitar-image-swt</module>
 		<module>../../TuxGuitar-synth</module>
 		<module>../../TuxGuitar-synth-gervill</module>
 		<module>../../TuxGuitar-synth-export</module>
 		<module>../../TuxGuitar-debug-helper</module>
+		<module>../../../common/TuxGuitar-asciiImport</module>
 	</modules>
 
 	<build>
@@ -175,6 +177,12 @@
 									<groupId>${project.groupId}</groupId>
 									<artifactId>tuxguitar-ascii</artifactId>
 									<destFileName>tuxguitar-ascii.jar</destFileName>
+									<outputDirectory>${project.build.directory}/${project.finalName}/share/plugins</outputDirectory>
+								</artifactItem>
+								<artifactItem>
+									<groupId>${project.groupId}</groupId>
+									<artifactId>tuxguitar-ascii-import</artifactId>
+									<destFileName>tuxguitar-ascii-import.jar</destFileName>
 									<outputDirectory>${project.build.directory}/${project.finalName}/share/plugins</outputDirectory>
 								</artifactItem>
 								<artifactItem>

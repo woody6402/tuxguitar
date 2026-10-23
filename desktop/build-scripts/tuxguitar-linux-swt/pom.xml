@@ -54,6 +54,8 @@
 		<module>../../TuxGuitar-synth-export</module>
 		<module>../../TuxGuitar-debug-helper</module>
 		<module>../../TuxGuitar-tray-swt</module>
+		<module>../../../common/TuxGuitar-ascii-import</module>
+		<module>../../TuxGuitar-browser-web</module>
 	</modules>
 
 	<build>
@@ -163,6 +165,20 @@
 									<destFileName>tuxguitar-ascii.jar</destFileName>
 									<outputDirectory>${project.build.directory}/${project.finalName}/share/plugins</outputDirectory>
 								</artifactItem>
+								<artifactItem>
+									<groupId>${project.groupId}</groupId>
+									<artifactId>tuxguitar-ascii-import</artifactId>
+									<destFileName>tuxguitar-ascii-import.jar</destFileName>
+									<outputDirectory>${project.build.directory}/${project.finalName}/share/plugins</outputDirectory>
+								</artifactItem>
+								<artifactItem>
+                    <groupId>${project.groupId}</groupId>
+                    <artifactId>tuxguitar-browser-web</artifactId>
+                    <destFileName>tuxguitar-browser-web.jar</destFileName>
+                    <outputDirectory>
+                        ${project.build.directory}/${project.finalName}/share/plugins
+                    </outputDirectory>
+                </artifactItem>
 								<artifactItem>
 									<groupId>${project.groupId}</groupId>
 									<artifactId>tuxguitar-browser-ftp</artifactId>
