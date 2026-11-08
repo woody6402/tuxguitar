@@ -29,6 +29,7 @@ import app.tuxguitar.song.models.TGBeat;
 import app.tuxguitar.song.models.TGChannel;
 import app.tuxguitar.song.models.TGChord;
 import app.tuxguitar.song.models.TGDuration;
+import app.tuxguitar.song.models.TGDivisionType;
 import app.tuxguitar.song.models.TGLyric;
 import app.tuxguitar.song.models.TGMeasure;
 import app.tuxguitar.song.models.TGMeasureHeader;
@@ -72,8 +73,77 @@ public class TESongParser {
 		this.addMeasures(tgSong, teSong);
 		this.sortComponents(teSong);
 		this.addComponents(tgSong, teSong);
+		this.normalizeTupletStarts(tgSong);
 
-		return new TGSongAdjuster(this.manager, tgSong).process();
+		/* Keep the source grid positions while beat durations are adjusted.  The
+		 * generic song update later uses precise starts; without this marker,
+		 * gaps at measure boundaries can be collapsed before silences are added.
+		 */
+		this.preserveImportedPositions(tgSong);
+		new TGSongAdjuster(this.manager, tgSong).process();
+		this.manager.autoCompleteSilences(tgSong);
+		this.debugBeats(tgSong);
+		return tgSong;
+	}
+
+	private void normalizeTupletStarts(TGSong song) {
+		Iterator<TGTrack> tracks = song.getTracks();
+		while (tracks.hasNext()) {
+			Iterator<TGMeasure> measures = tracks.next().getMeasures();
+			while (measures.hasNext()) {
+				TGMeasure measure = measures.next();
+				TGBeat previous = null;
+				Iterator<TGBeat> beats = measure.getBeats().iterator();
+				while (beats.hasNext()) {
+					TGBeat beat = beats.next();
+					TGVoice voice = beat.getVoice(0);
+					if (previous != null && !voice.isRestVoice()
+							&& !previous.getVoice(0).isRestVoice()
+							&& !voice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
+							&& !previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)) {
+						beat.setStart(previous.getStart() + previous.getVoice(0).getDuration().getTime());
+						beat.setPreciseStart(TGDuration.toPreciseTime(beat.getStart()));
+					}
+					previous = beat;
+				}
+			}
+		}
+	}
+
+	private void debugBeats(TGSong song) {
+		if (!"1".equals(System.getenv("TUXGUITAR_TEF_DEBUG"))) {
+			return;
+		}
+		Iterator<TGTrack> tracks = song.getTracks();
+		while (tracks.hasNext()) {
+			TGTrack track = tracks.next();
+			Iterator<TGMeasure> measures = track.getMeasures();
+			while (measures.hasNext()) {
+				TGMeasure measure = measures.next();
+				if (measure.getHeader().getNumber() < 3 || measure.getHeader().getNumber() > 4) {
+					continue;
+				}
+				for (TGBeat beat : measure.getBeats()) {
+					TGVoice voice = beat.getVoice(0);
+					System.err.printf("TEF beat measure=%d start=%d precise=%d duration=%d rest=%s notes=%d%n",
+						measure.getHeader().getNumber(), beat.getStart(), beat.getPreciseStart(),
+						voice.getDuration().getTime(), voice.isRestVoice(), voice.countNotes());
+				}
+			}
+		}
+	}
+
+	private void preserveImportedPositions(TGSong song) {
+		Iterator<TGTrack> tracks = song.getTracks();
+		while (tracks.hasNext()) {
+			Iterator<TGMeasure> measures = tracks.next().getMeasures();
+			while (measures.hasNext()) {
+				TGMeasure measure = measures.next();
+				for (TGBeat beat : measure.getBeats()) {
+					beat.setPreciseStart(TGDuration.toPreciseTime(beat.getStart()));
+				}
+			}
+		}
 	}
 
 	private void addSongHeader(TGSong tgSong, TESong teSong) {
@@ -442,7 +512,14 @@ public class TESongParser {
 				break;
 		}
 
-		tgVoice.getDuration().copyFrom(tgDuration);
+		// A TEF beat may contain notes from different strings with different
+		// encoded durations. Preserve a tuplet duration once one is present;
+		// otherwise a normal note on the same beat can overwrite it and the
+		// adjuster will collapse the tuplet to the next grid position.
+		if (tgVoice.isEmpty() || tgVoice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
+				|| !tgDuration.getDivision().isEqual(TGDivisionType.NORMAL)) {
+			tgVoice.getDuration().copyFrom(tgDuration);
+		}
 		tgVoice.addNote(tgNote);
 
 		return tgNote;
@@ -811,7 +888,8 @@ class TGSongAdjuster {
 				}
 
 				// check the duration
-				if(previousStart < beatStart && (previousStart + previousLength) > beatStart){
+				if(previousStart < beatStart && (previousStart + previousLength) > beatStart
+						&& previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)){
 					if(beat.getVoice(0).isRestVoice()){
 						measure.removeBeat(beat);
 						finish = false;
