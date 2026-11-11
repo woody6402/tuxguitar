@@ -51,6 +51,13 @@ import app.tuxguitar.song.models.effects.TGEffectHarmonic;
 import app.tuxguitar.song.models.effects.TGEffectTremoloPicking;
 
 public class TESongParser {
+	/*
+	 * Keep the historical single-voice rendering by default.  Splitting a
+	 * mixed-duration chord is only safe when the source explicitly provides
+	 * persistent independent voices; the duration-only heuristic is therefore
+	 * disabled unless explicitly requested for experiments.
+	 */
+	private static final boolean SPLIT_MIXED_DURATIONS = "persistent".equals(System.getenv("TUXGUITAR_TEF_SPLIT_VOICES"));
 
 	private static final int[][] PERCUSSION_TUNINGS = new int[][]{
 		new int[]{ 49, 41, 32 },
@@ -77,14 +84,7 @@ public class TESongParser {
 		this.applyReadingList(tgSong, teSong.getReadingListEntries());
 		this.normalizeTupletStarts(tgSong);
 
-		/* Keep the source grid positions while beat durations are adjusted.  The
-		 * generic song update later uses precise starts; without this marker,
-		 * gaps at measure boundaries can be collapsed before silences are added.
-		 */
-		this.preserveImportedPositions(tgSong);
 		new TGSongAdjuster(this.manager, tgSong).process();
-		this.manager.autoCompleteSilences(tgSong);
-		this.debugBeats(tgSong);
 		return tgSong;
 	}
 
@@ -132,6 +132,7 @@ public class TESongParser {
 			Iterator<TGMeasure> measures = tracks.next().getMeasures();
 			while (measures.hasNext()) {
 				TGMeasure measure = measures.next();
+				long measureEnd = measure.getStart() + measure.getLength();
 				TGBeat previous = null;
 				Iterator<TGBeat> beats = measure.getBeats().iterator();
 				while (beats.hasNext()) {
@@ -141,46 +142,13 @@ public class TESongParser {
 							&& !previous.getVoice(0).isRestVoice()
 							&& !voice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
 							&& !previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)) {
-						beat.setStart(previous.getStart() + previous.getVoice(0).getDuration().getTime());
-						beat.setPreciseStart(TGDuration.toPreciseTime(beat.getStart()));
+						long expectedStart = previous.getStart() + previous.getVoice(0).getDuration().getTime();
+						if (expectedStart < measureEnd) {
+							beat.setStart(expectedStart);
+							beat.setPreciseStart(TGDuration.toPreciseTime(beat.getStart()));
+						}
 					}
 					previous = beat;
-				}
-			}
-		}
-	}
-
-	private void debugBeats(TGSong song) {
-		if (!"1".equals(System.getenv("TUXGUITAR_TEF_DEBUG"))) {
-			return;
-		}
-		Iterator<TGTrack> tracks = song.getTracks();
-		while (tracks.hasNext()) {
-			TGTrack track = tracks.next();
-			Iterator<TGMeasure> measures = track.getMeasures();
-			while (measures.hasNext()) {
-				TGMeasure measure = measures.next();
-				if (measure.getHeader().getNumber() < 3 || measure.getHeader().getNumber() > 4) {
-					continue;
-				}
-				for (TGBeat beat : measure.getBeats()) {
-					TGVoice voice = beat.getVoice(0);
-					System.err.printf("TEF beat measure=%d start=%d precise=%d duration=%d rest=%s notes=%d%n",
-						measure.getHeader().getNumber(), beat.getStart(), beat.getPreciseStart(),
-						voice.getDuration().getTime(), voice.isRestVoice(), voice.countNotes());
-				}
-			}
-		}
-	}
-
-	private void preserveImportedPositions(TGSong song) {
-		Iterator<TGTrack> tracks = song.getTracks();
-		while (tracks.hasNext()) {
-			Iterator<TGMeasure> measures = tracks.next().getMeasures();
-			while (measures.hasNext()) {
-				TGMeasure measure = measures.next();
-				for (TGBeat beat : measure.getBeats()) {
-					beat.setPreciseStart(TGDuration.toPreciseTime(beat.getStart()));
 				}
 			}
 		}
@@ -333,7 +301,7 @@ public class TESongParser {
 			TETrack teTrack = teTracks.get(componentTrackIndex);
 			TGTrack tgTrack = tgSong.getTrack(componentTrackIndex);
 			TGMeasure tgMeasure = tgTrack.getMeasure(measure);
-			TGBeat tgBeat = getBeat(tgMeasure, this.getGridPosition(tgMeasure, component.getPosition()));
+			TGBeat tgBeat = getBeatPrecise(tgMeasure, this.getGridPrecisePosition(tgMeasure, component.getPosition()));
 
 			if(component instanceof TEComponentNote) {
 				TGNote tgNote = this.addNote(teTrack, (TEComponentNote)component, tgBeat);
@@ -393,11 +361,11 @@ public class TESongParser {
 		});
 	}
 
-	private TGBeat getBeat(TGMeasure measure, long start){
-		TGBeat beat = this.manager.getMeasureManager().getBeat(measure, start);
+	private TGBeat getBeatPrecise(TGMeasure measure, long preciseStart){
+		TGBeat beat = this.manager.getMeasureManager().getBeatPrecise(measure, preciseStart);
 		if(beat == null){
 			beat = this.manager.getFactory().newBeat();
-			beat.setStart(start);
+			beat.setPreciseStart(preciseStart);
 			measure.addBeat(beat);
 		}
 		return beat;
@@ -406,12 +374,12 @@ public class TESongParser {
 	// TablEdit uses a 16th note grid.
 	// Anything smaller than a 16th note is padded with rests to be a 16th note.
 	// So a 1/64th note is actually 1/64th note, with 3 1/64th note rests after it.
-	private long getGridPosition(TGMeasure measure, TEPosition position){
-		long measureStart = measure.getStart();
+	private long getGridPrecisePosition(TGMeasure measure, TEPosition position){
+		long measureStart = measure.getPreciseStart();
 		int positionInMeasure = position.getPositionInMeasure();
 
 		float durationOfSixteenthNote = (float)TGDuration.QUARTER / TGDuration.SIXTEENTH;
-		float sizePerGridPosition = TGDuration.QUARTER_TIME * durationOfSixteenthNote;
+		float sizePerGridPosition = TGDuration.toPreciseTime(TGDuration.QUARTER_TIME) * durationOfSixteenthNote;
 
 		long gridPosition = (long) (measureStart + (sizePerGridPosition * positionInMeasure));
 
@@ -537,6 +505,10 @@ public class TESongParser {
 		}
 
 		TGDuration tgDuration = this.getDuration(teNote.getDuration().getValue());
+		if (voiceIndex == 0 && SPLIT_MIXED_DURATIONS
+				&& teNote.getAttributes() != TEComponentNote.TEComponentNoteAttributes.UpperVoice) {
+			voiceIndex = this.getVoiceIndex(tgBeat, tgDuration);
+		}
 		TGVoice tgVoice = tgBeat.getVoice(voiceIndex);
 
 		switch (teNote.getStroke()) {
@@ -557,12 +529,28 @@ public class TESongParser {
 		// otherwise a normal note on the same beat can overwrite it and the
 		// adjuster will collapse the tuplet to the next grid position.
 		if (tgVoice.isEmpty() || tgVoice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
-				|| !tgDuration.getDivision().isEqual(TGDivisionType.NORMAL)) {
+				|| (!tgDuration.getDivision().isEqual(TGDivisionType.NORMAL)
+						&& tgDuration.getTime() < tgVoice.getDuration().getTime())) {
 			tgVoice.getDuration().copyFrom(tgDuration);
 		}
 		tgVoice.addNote(tgNote);
 
 		return tgNote;
+	}
+
+	private int getVoiceIndex(TGBeat beat, TGDuration duration) {
+		for (int i = 0; i < beat.countVoices(); i++) {
+			TGVoice voice = beat.getVoice(i);
+			if (!voice.isEmpty() && voice.getDuration().isEqual(duration)) {
+				return i;
+			}
+		}
+		for (int i = 0; i < beat.countVoices(); i++) {
+			if (beat.getVoice(i).isEmpty()) {
+				return i;
+			}
+		}
+		return 0;
 	}
 
 	private void addNoteEffects(TGNote tgNote, TEComponentNote teNote) {
@@ -931,8 +919,10 @@ class TGSongAdjuster {
 				}
 
 				// check the duration
-				if(previousStart < beatStart && (previousStart + previousLength) > beatStart
-						&& previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)){
+				long overlap = (previousStart + previousLength) - beatStart;
+				if(previousStart < beatStart && overlap > 0
+						&& (previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
+								|| overlap <= (TGDuration.QUARTER_TIME / 2))){
 					if(beat.getVoice(0).isRestVoice()){
 						measure.removeBeat(beat);
 						finish = false;
@@ -953,7 +943,9 @@ class TGSongAdjuster {
 			}
 			previous = beat;
 		}
-		if(!finish){
+		if(finish){
+			this.manager.autoCompleteSilences(this.song, measure.getHeader());
+		} else {
 			adjustBeats(measure);
 		}
 	}

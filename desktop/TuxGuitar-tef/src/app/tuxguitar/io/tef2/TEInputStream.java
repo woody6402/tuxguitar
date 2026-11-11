@@ -221,7 +221,6 @@ public class TEInputStream {
 			int position = (location  %  tsSize);
 			int string = ( (location / tsSize)  % this.song.getStrings()) ;
 			int measure = ( location / ( tsSize * this.song.getStrings() ) );
-
 			tsMove = (mIndex == measure)?tsMove:0;
 			position -= tsMove;
 

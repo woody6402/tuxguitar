@@ -36,6 +36,13 @@ import app.tuxguitar.song.models.effects.TGEffectHarmonic;
 import app.tuxguitar.song.models.effects.TGEffectTremoloPicking;
 
 public class TESongParser {
+	/*
+	 * Keep the historical single-voice rendering by default.  Splitting a
+	 * mixed-duration chord is only safe when the source explicitly provides
+	 * persistent independent voices; the duration-only heuristic is therefore
+	 * disabled unless explicitly requested for experiments.
+	 */
+	private static final boolean SPLIT_MIXED_DURATIONS = "persistent".equals(System.getenv("TUXGUITAR_TEF_SPLIT_VOICES"));
 
 	private static final int[][] PERCUSSION_TUNINGS = new int[][]{
 		new int[]{ 49, 41, 32 },
@@ -61,10 +68,8 @@ public class TESongParser {
 		this.addComponents(tgSong, song);
 		this.applyReadingList(tgSong, song.getRepeats());
 		this.normalizeTupletStarts(tgSong);
-		this.preserveImportedPositions(tgSong);
 
 		new TGSongAdjuster(this.manager, tgSong).process();
-		this.manager.autoCompleteSilences(tgSong);
 		this.collapseShortTupletGaps(tgSong);
 		return tgSong;
 	}
@@ -157,6 +162,7 @@ public class TESongParser {
 			while (measures.hasNext()) {
 				TGMeasure measure = measures.next();
 				this.manager.getMeasureManager().orderBeats(measure);
+				long measureEnd = measure.getStart() + measure.getLength();
 				TGBeat previous = null;
 				Iterator<TGBeat> beats = measure.getBeats().iterator();
 				while (beats.hasNext()) {
@@ -166,27 +172,15 @@ public class TESongParser {
 							&& !previous.getVoice(0).isRestVoice()
 							&& !voice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)) {
 						long expectedStart = previous.getStart() + previous.getVoice(0).getDuration().getTime();
-						if (!previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
+						if (expectedStart < measureEnd
+								&& (!previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
 								|| (beat.getStart() > expectedStart
-										&& beat.getStart() - expectedStart < (TGDuration.QUARTER_TIME / 4))) {
+										&& beat.getStart() - expectedStart < (TGDuration.QUARTER_TIME / 4)))) {
 							beat.setStart(expectedStart);
 							beat.setPreciseStart(TGDuration.toPreciseTime(expectedStart));
 						}
 					}
 					previous = beat;
-				}
-			}
-		}
-	}
-
-	private void preserveImportedPositions(TGSong song) {
-		Iterator<TGTrack> tracks = song.getTracks();
-		while (tracks.hasNext()) {
-			Iterator<TGMeasure> measures = tracks.next().getMeasures();
-			while (measures.hasNext()) {
-				TGMeasure measure = measures.next();
-				for (TGBeat beat : measure.getBeats()) {
-					beat.setPreciseStart(TGDuration.toPreciseTime(beat.getStart()));
 				}
 			}
 		}
@@ -275,22 +269,22 @@ public class TESongParser {
 		}
 	}
 
-	private TGBeat getBeat(TGMeasure measure, long start){
-		TGBeat beat = this.manager.getMeasureManager().getBeat(measure, start);
+	private TGBeat getBeatPrecise(TGMeasure measure, long preciseStart){
+		TGBeat beat = this.manager.getMeasureManager().getBeatPrecise(measure, preciseStart);
 		if(beat == null){
 			beat = this.manager.getFactory().newBeat();
-			beat.setStart(start);
+			beat.setPreciseStart(preciseStart);
 			measure.addBeat(beat);
 		}
 		return beat;
 	}
 
-	private long getStart(TGDuration duration, TGMeasure measure,int position){
+	private long getPreciseStart(TGDuration duration, TGMeasure measure,int position){
 		float fixedPosition = position;
 		if(duration != null && !duration.getDivision().isEqual(TGDivisionType.NORMAL)){
 			fixedPosition = (( fixedPosition - (fixedPosition % 64)) + ((((fixedPosition % 64) * 2) * 2) / 3) );
 		}
-		long start = ((long) (measure.getStart() + ( (fixedPosition * TGDuration.QUARTER_TIME)  / 64)) );
+		long start = ((long) (measure.getPreciseStart() + ( (fixedPosition * TGDuration.toPreciseTime(TGDuration.QUARTER_TIME))  / 64)) );
 
 		return start;
 	}
@@ -377,12 +371,32 @@ public class TESongParser {
 		this.applyTechniques(note, tgNote);
 
 		TGDuration tgDuration = getDuration( note.getDuration() );
-		TGBeat tgBeat = getBeat(tgMeasure, getStart(tgDuration, tgMeasure, note.getPosition()));
-		if (tgBeat.getVoice(0).isEmpty() || tgBeat.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
-				|| !tgDuration.getDivision().isEqual(TGDivisionType.NORMAL)) {
-			tgBeat.getVoice(0).getDuration().copyFrom(tgDuration);
+		TGBeat tgBeat = getBeatPrecise(tgMeasure, getPreciseStart(tgDuration, tgMeasure, note.getPosition()));
+		TGVoice tgVoice = tgBeat.getVoice(this.getVoiceIndex(tgBeat, tgDuration));
+		if (tgVoice.isEmpty() || tgVoice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
+				|| (!tgDuration.getDivision().isEqual(TGDivisionType.NORMAL)
+						&& tgDuration.getTime() < tgVoice.getDuration().getTime())) {
+			tgVoice.getDuration().copyFrom(tgDuration);
 		}
-		tgBeat.getVoice(0).addNote(tgNote);
+		tgVoice.addNote(tgNote);
+	}
+
+	private int getVoiceIndex(TGBeat beat, TGDuration duration) {
+		if (!SPLIT_MIXED_DURATIONS) {
+			return 0;
+		}
+		for (int i = 0; i < beat.countVoices(); i++) {
+			TGVoice voice = beat.getVoice(i);
+			if (!voice.isEmpty() && voice.getDuration().isEqual(duration)) {
+				return i;
+			}
+		}
+		for (int i = 0; i < beat.countVoices(); i++) {
+			if (beat.getVoice(i).isEmpty()) {
+				return i;
+			}
+		}
+		return 0;
 	}
 
 	private int getVelocityFromDynamic(int dynamic) {
@@ -580,7 +594,7 @@ public class TESongParser {
 				tgChord.addFretValue(i,value);
 			}
 			if(tgChord.countNotes() > 0){
-				TGBeat tgBeat = getBeat(tgMeasure, getStart(null, tgMeasure, component.getPosition()));
+				TGBeat tgBeat = getBeatPrecise(tgMeasure, getPreciseStart(null, tgMeasure, component.getPosition()));
 				tgBeat.setChord(tgChord);
 			}
 		}
@@ -706,8 +720,10 @@ class TGSongAdjuster{
 				}
 
 				// check the duration
-				if(previousStart < beatStart && (previousStart + previousLength) > beatStart
-						&& previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)){
+				long overlap = (previousStart + previousLength) - beatStart;
+				if(previousStart < beatStart && overlap > 0
+						&& (previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
+								|| overlap <= (TGDuration.QUARTER_TIME / 2))){
 					if(beat.getVoice(0).isRestVoice()){
 						measure.removeBeat(beat);
 						finish = false;
@@ -728,7 +744,9 @@ class TGSongAdjuster{
 			}
 			previous = beat;
 		}
-		if(!finish){
+		if(finish){
+			this.manager.autoCompleteSilences(this.song, measure.getHeader());
+		} else {
 			adjustBeats(measure);
 		}
 	}
