@@ -1,8 +1,10 @@
 package app.tuxguitar.io.tef2;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 
 import app.tuxguitar.io.tef2.base.TEChord;
 import app.tuxguitar.io.tef2.base.TEComponent;
@@ -15,6 +17,7 @@ import app.tuxguitar.io.tef2.base.TESong;
 import app.tuxguitar.io.tef2.base.TETimeSignature;
 import app.tuxguitar.io.tef2.base.TETrack;
 import app.tuxguitar.song.factory.TGFactory;
+import app.tuxguitar.song.managers.TGMeasureManager;
 import app.tuxguitar.song.managers.TGSongManager;
 import app.tuxguitar.song.models.TGBeat;
 import app.tuxguitar.song.models.TGChannel;
@@ -29,20 +32,12 @@ import app.tuxguitar.song.models.TGString;
 import app.tuxguitar.song.models.TGTimeSignature;
 import app.tuxguitar.song.models.TGTempo;
 import app.tuxguitar.song.models.TGTrack;
-import app.tuxguitar.song.models.TGVoice;
 import app.tuxguitar.song.models.TGVelocities;
 import app.tuxguitar.song.models.effects.TGEffectBend;
 import app.tuxguitar.song.models.effects.TGEffectHarmonic;
 import app.tuxguitar.song.models.effects.TGEffectTremoloPicking;
 
 public class TESongParser {
-	/*
-	 * Keep the historical single-voice rendering by default.  Splitting a
-	 * mixed-duration chord is only safe when the source explicitly provides
-	 * persistent independent voices; the duration-only heuristic is therefore
-	 * disabled unless explicitly requested for experiments.
-	 */
-	private static final boolean SPLIT_MIXED_DURATIONS = "persistent".equals(System.getenv("TUXGUITAR_TEF_SPLIT_VOICES"));
 
 	private static final int[][] PERCUSSION_TUNINGS = new int[][]{
 		new int[]{ 49, 41, 32 },
@@ -65,125 +60,35 @@ public class TESongParser {
 		this.addTracksAndHeaders(tgSong, song.getTracks().length,song.getMeasures(),song.getTempo().getValue());
 		this.addMeasureValues(tgSong, song);
 		this.addTrackValues(tgSong, song.getTracks());
+		this.cleanMeasures(tgSong);
 		this.addComponents(tgSong, song);
 		this.applyReadingList(tgSong, song.getRepeats());
-		this.normalizeTupletStarts(tgSong);
 
-		new TGSongAdjuster(this.manager, tgSong).process();
-		this.collapseShortTupletGaps(tgSong);
-		return tgSong;
+		return new TGSongAdjuster(this.manager, tgSong).process();
 	}
 
-	/**
-	 * TablEdit stores the playback/reading list separately from the graphical
-	 * ending components.  Importing only the latter loses the repeat signs for
-	 * files whose endings are generated from entries such as 1-8, 1-7, 9-25.
-	 */
 	private void applyReadingList(TGSong song, TERepeat[] repeats) {
-		if (repeats == null || repeats.length < 2) {
-			return;
-		}
-
+		if (repeats == null) return;
 		for (int i = 0; i + 2 < repeats.length; i++) {
-			TERepeat first = repeats[i];
-			TERepeat repeated = repeats[i + 1];
-			TERepeat secondEnding = repeats[i + 2];
-			int firstStart = first.getData1();
-			int firstEnd = first.getData2();
-			if (firstStart <= 0 || firstEnd < firstStart
-					|| repeated.getData1() < firstStart || repeated.getData2() >= firstEnd
-					|| secondEnding.getData1() <= repeated.getData2()) {
-				continue;
+			TERepeat first = repeats[i], repeated = repeats[i + 1], secondEnding = repeats[i + 2];
+			int firstStart = first.getData1(), firstEnd = first.getData2();
+			if (firstStart <= 0 || firstEnd < firstStart || repeated.getData1() < firstStart
+					|| repeated.getData2() >= firstEnd || secondEnding.getData1() <= repeated.getData2()) continue;
+			TGMeasureHeader open = getHeader(song, repeated.getData1());
+			TGMeasureHeader close = getHeader(song, firstEnd);
+			TGMeasureHeader second = getHeader(song, secondEnding.getData1());
+			if (open != null && close != null) {
+				open.setRepeatOpen(true);
+				close.setRepeatClose(Math.max(1, close.getRepeatClose()));
+				close.setRepeatAlternative(close.getRepeatAlternative() | 1);
 			}
-			TGMeasureHeader openHeader = getHeader(song, repeated.getData1());
-			TGMeasureHeader closeHeader = getHeader(song, firstEnd);
-			TGMeasureHeader secondHeader = getHeader(song, secondEnding.getData1());
-			if (openHeader != null && closeHeader != null) {
-				openHeader.setRepeatOpen(true);
-				closeHeader.setRepeatClose(Math.max(1, closeHeader.getRepeatClose()));
-				closeHeader.setRepeatAlternative(closeHeader.getRepeatAlternative() | 1);
-			}
-			if (secondHeader != null) {
-				secondHeader.setRepeatAlternative(secondHeader.getRepeatAlternative() | 2);
-			}
+			if (second != null) second.setRepeatAlternative(second.getRepeatAlternative() | 2);
 		}
 	}
 
 	private TGMeasureHeader getHeader(TGSong song, int measureNumber) {
-		if (measureNumber < 1 || measureNumber > song.countMeasureHeaders()) {
-			return null;
-		}
+		if (measureNumber < 1 || measureNumber > song.countMeasureHeaders()) return null;
 		return song.getMeasureHeader(measureNumber - 1);
-	}
-
-	private void collapseShortTupletGaps(TGSong song) {
-		Iterator<TGTrack> tracks = song.getTracks();
-		while (tracks.hasNext()) {
-			Iterator<TGMeasure> measures = tracks.next().getMeasures();
-			while (measures.hasNext()) {
-				TGMeasure measure = measures.next();
-				this.manager.getMeasureManager().orderBeats(measure);
-				int i = 1;
-				while (i < measure.countBeats() - 1) {
-					TGBeat before = measure.getBeat(i - 1);
-					TGBeat current = measure.getBeat(i);
-					if (!current.getVoice(0).isRestVoice() || current.getVoice(0).getDuration().getTime() >= (TGDuration.QUARTER_TIME / 4)
-							|| before.getVoice(0).isRestVoice()) {
-						i++;
-						continue;
-					}
-					int end = i;
-					while (end < measure.countBeats() && measure.getBeat(end).getVoice(0).isRestVoice()
-							&& measure.getBeat(end).getVoice(0).getDuration().getTime() < (TGDuration.QUARTER_TIME / 4)) {
-						end++;
-					}
-					if (end < measure.countBeats()) {
-						TGBeat next = measure.getBeat(end);
-						if (!next.getVoice(0).isRestVoice()
-								&& !next.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)) {
-							for (int remove = end - 1; remove >= i; remove--) {
-								measure.removeBeat(measure.getBeat(remove));
-							}
-							next.setStart(before.getStart() + before.getVoice(0).getDuration().getTime());
-							next.setPreciseStart(TGDuration.toPreciseTime(next.getStart()));
-							continue;
-						}
-					}
-					i = end;
-				}
-			}
-		}
-	}
-
-	private void normalizeTupletStarts(TGSong song) {
-		Iterator<TGTrack> tracks = song.getTracks();
-		while (tracks.hasNext()) {
-			Iterator<TGMeasure> measures = tracks.next().getMeasures();
-			while (measures.hasNext()) {
-				TGMeasure measure = measures.next();
-				this.manager.getMeasureManager().orderBeats(measure);
-				long measureEnd = measure.getStart() + measure.getLength();
-				TGBeat previous = null;
-				Iterator<TGBeat> beats = measure.getBeats().iterator();
-				while (beats.hasNext()) {
-					TGBeat beat = beats.next();
-					TGVoice voice = beat.getVoice(0);
-					if (previous != null && !voice.isRestVoice()
-							&& !previous.getVoice(0).isRestVoice()
-							&& !voice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)) {
-						long expectedStart = previous.getStart() + previous.getVoice(0).getDuration().getTime();
-						if (expectedStart < measureEnd
-								&& (!previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
-								|| (beat.getStart() > expectedStart
-										&& beat.getStart() - expectedStart < (TGDuration.QUARTER_TIME / 4)))) {
-							beat.setStart(expectedStart);
-							beat.setPreciseStart(TGDuration.toPreciseTime(expectedStart));
-						}
-					}
-					previous = beat;
-				}
-			}
-		}
 	}
 
 	private void addTracksAndHeaders(TGSong song, int tracks,int measures,int tempo){
@@ -236,6 +141,13 @@ public class TESongParser {
 		}
 	}
 
+	private void cleanMeasures(TGSong tgSong) {
+		Iterator<TGTrack> tracks = tgSong.getTracks();
+		while (tracks.hasNext()) {
+			this.manager.getMeasureManager().cleanMeasure(tracks.next().getMeasure(0));
+		}
+	}
+
 	private void addComponents(TGSong tgSong, TESong song){
 		Iterator<TEComponent> it = song.getComponents().iterator();
 		while(it.hasNext()){
@@ -269,22 +181,22 @@ public class TESongParser {
 		}
 	}
 
-	private TGBeat getBeatPrecise(TGMeasure measure, long preciseStart){
-		TGBeat beat = this.manager.getMeasureManager().getBeatPrecise(measure, preciseStart);
+	private TGBeat getBeat(TGMeasure measure, long start){
+		TGBeat beat = this.manager.getMeasureManager().getBeat(measure, start);
 		if(beat == null){
 			beat = this.manager.getFactory().newBeat();
-			beat.setPreciseStart(preciseStart);
+			beat.setStart(start);
 			measure.addBeat(beat);
 		}
 		return beat;
 	}
 
-	private long getPreciseStart(TGDuration duration, TGMeasure measure,int position){
+	private long getStart(TGDuration duration, TGMeasure measure,int position){
 		float fixedPosition = position;
 		if(duration != null && !duration.getDivision().isEqual(TGDivisionType.NORMAL)){
 			fixedPosition = (( fixedPosition - (fixedPosition % 64)) + ((((fixedPosition % 64) * 2) * 2) / 3) );
 		}
-		long start = ((long) (measure.getPreciseStart() + ( (fixedPosition * TGDuration.toPreciseTime(TGDuration.QUARTER_TIME))  / 64)) );
+		long start = ((long) (measure.getStart() + ( (fixedPosition * TGDuration.QUARTER_TIME)  / 64)) );
 
 		return start;
 	}
@@ -371,32 +283,12 @@ public class TESongParser {
 		this.applyTechniques(note, tgNote);
 
 		TGDuration tgDuration = getDuration( note.getDuration() );
-		TGBeat tgBeat = getBeatPrecise(tgMeasure, getPreciseStart(tgDuration, tgMeasure, note.getPosition()));
-		TGVoice tgVoice = tgBeat.getVoice(this.getVoiceIndex(tgBeat, tgDuration));
-		if (tgVoice.isEmpty() || tgVoice.getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
-				|| (!tgDuration.getDivision().isEqual(TGDivisionType.NORMAL)
-						&& tgDuration.getTime() < tgVoice.getDuration().getTime())) {
-			tgVoice.getDuration().copyFrom(tgDuration);
+		TGBeat tgBeat = getBeat(tgMeasure, getStart(tgDuration, tgMeasure, note.getPosition()));
+		// merge voices: keep shortest duration
+		if (tgBeat.getVoice(0).isEmpty() || (tgDuration.compareTo(tgBeat.getVoice(0).getDuration()) < 0)) {
+			tgBeat.getVoice(0).getDuration().copyFrom(tgDuration);
 		}
-		tgVoice.addNote(tgNote);
-	}
-
-	private int getVoiceIndex(TGBeat beat, TGDuration duration) {
-		if (!SPLIT_MIXED_DURATIONS) {
-			return 0;
-		}
-		for (int i = 0; i < beat.countVoices(); i++) {
-			TGVoice voice = beat.getVoice(i);
-			if (!voice.isEmpty() && voice.getDuration().isEqual(duration)) {
-				return i;
-			}
-		}
-		for (int i = 0; i < beat.countVoices(); i++) {
-			if (beat.getVoice(i).isEmpty()) {
-				return i;
-			}
-		}
-		return 0;
+		tgBeat.getVoice(0).addNote(tgNote);
 	}
 
 	private int getVelocityFromDynamic(int dynamic) {
@@ -594,7 +486,7 @@ public class TESongParser {
 				tgChord.addFretValue(i,value);
 			}
 			if(tgChord.countNotes() > 0){
-				TGBeat tgBeat = getBeatPrecise(tgMeasure, getPreciseStart(null, tgMeasure, component.getPosition()));
+				TGBeat tgBeat = getBeat(tgMeasure, getStart(null, tgMeasure, component.getPosition()));
 				tgBeat.setChord(tgChord);
 			}
 		}
@@ -616,10 +508,8 @@ public class TESongParser {
 		}
 
 		int endingNumber = ending.getEndingNumber();
-
 		if (endingNumber > 0) {
-			measureHeader.setRepeatAlternative(
-				measureHeader.getRepeatAlternative() | (1 << (endingNumber - 1)));
+			measureHeader.setRepeatAlternative(measureHeader.getRepeatAlternative() | (1 << (endingNumber - 1)));
 		}
 
 		if (ending.getIsCloseBracket() && endingNumber >= 2) {
@@ -682,6 +572,7 @@ class TGSongAdjuster{
 	public void process(TGMeasure measure){
 		this.manager.getMeasureManager().orderBeats(measure);
 		this.adjustBeats(measure);
+		this.autoCompleteSilences(measure);
 	}
 
 	public void adjustBeats(TGMeasure measure){
@@ -720,17 +611,23 @@ class TGSongAdjuster{
 				}
 
 				// check the duration
-				long overlap = (previousStart + previousLength) - beatStart;
-				if(previousStart < beatStart && overlap > 0
-						&& (previous.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)
-								|| overlap <= (TGDuration.QUARTER_TIME / 2))){
+				if(previousStart < beatStart && (previousStart + previousLength) > beatStart){
 					if(beat.getVoice(0).isRestVoice()){
 						measure.removeBeat(beat);
 						finish = false;
 						break;
 					}
-					TGDuration duration = TGDuration.fromTime(this.manager.getFactory(), (beatStart - previousStart) );
-					previous.getVoice(0).getDuration().copyFrom( duration );
+					// overlap between current and previous
+					if (beat.getVoice(0).getDuration().getDivision().isEqual(TGDivisionType.NORMAL)) {
+						// current is not a triplet, assuming its position is correct
+						TGDuration duration = TGDuration.fromTime(this.manager.getFactory(), (beatStart - previousStart) );
+						previous.getVoice(0).getDuration().copyFrom( duration );
+					}
+					else {
+						// part of a triplet, assuming position of previous one is correct
+						beatStart = previousStart + previousLength;
+						beat.setStart(beatStart);
+					}
 				}
 			}
 			if( (beatStart + beatLength) > measureEnd ){
@@ -744,10 +641,57 @@ class TGSongAdjuster{
 			}
 			previous = beat;
 		}
-		if(finish){
-			this.manager.autoCompleteSilences(this.song, measure.getHeader());
-		} else {
+		if(!finish){
 			adjustBeats(measure);
 		}
+	}
+
+	// not using the standard method from TGMeasureManager, as .preciseStart attribute of beats is not set
+	private void autoCompleteSilences(TGMeasure measure) {
+		TGMeasureManager measureManager = this.manager.getMeasureManager();
+		if (measure.getBeats().isEmpty()) {
+			measureManager.autoCompleteSilences(measure);
+			return;
+		}
+
+		TGBeat firstBeat = measure.getBeats().get(0);
+		// no voice: fill measure and return
+		if (firstBeat.getVoice(0) == null) {
+			measureManager.autoCompleteSilences(measure);
+			return;
+		}
+
+		// complete silences before first note
+		List<TGBeat> newBeats = this.createSilences(measure.getStart(), firstBeat.getStart());
+
+		TGBeat previousBeat = null;
+		for (TGBeat beat : measure.getBeats()) {
+			if (previousBeat != null) {
+				newBeats.addAll(this.createSilences(previousBeat.getStart() + previousBeat.getVoice(0).getDuration().getTime(), beat.getStart()));
+			}
+			previousBeat = beat;
+		}
+		for (TGBeat newBeat : newBeats) {
+			this.manager.getMeasureManager().addBeat(measure, newBeat);
+		}
+
+	}
+
+	private List<TGBeat> createSilences(long from, long to) {
+		List<TGBeat> newBeats = new ArrayList<TGBeat>();
+		if (to <= from) {
+			return newBeats;
+		}
+		long start = from;
+		List<TGDuration> durations = TGDuration.splitPreciseDurationApproximately(TGDuration.toPreciseTime(to-from), TGDuration.WHOLE_PRECISE_DURATION, this.manager.getFactory(), null, 3);
+		for (TGDuration duration : durations) {
+			TGBeat beat = this.manager.getFactory().newBeat();
+			beat.setStart(start);
+			beat.getVoice(0).setEmpty(false);
+			beat.getVoice(0).getDuration().copyFrom(duration);
+			newBeats.add(beat);
+			start += duration.getTime();
+		}
+		return newBeats;
 	}
 }
