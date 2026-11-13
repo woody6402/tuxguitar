@@ -877,14 +877,14 @@ class TGSongAdjuster {
 	private void autoCompleteSilences(TGMeasure measure) {
 		TGMeasureManager measureManager = this.manager.getMeasureManager();
 		if (measure.getBeats().isEmpty()) {
-			this.addSilences(measure, this.createSilences(measure.getStart(), measure.getStart() + measure.getLength()));
+			measureManager.autoCompleteSilences(measure);
 			return;
 		}
 
 		TGBeat firstBeat = measure.getBeats().get(0);
 		// no voice: fill measure and return
 		if (firstBeat.getVoice(0) == null) {
-			this.addSilences(measure, this.createSilences(measure.getStart(), measure.getStart() + measure.getLength()));
+			measureManager.autoCompleteSilences(measure);
 			return;
 		}
 
@@ -914,7 +914,6 @@ class TGSongAdjuster {
 		for (TGDuration duration : durations) {
 			TGBeat beat = this.manager.getFactory().newBeat();
 			beat.setStart(start);
-			beat.setPreciseStart(TGDuration.toPreciseTime(start));
 			beat.getVoice(0).setEmpty(false);
 			beat.getVoice(0).getDuration().copyFrom(duration);
 			newBeats.add(beat);
@@ -922,11 +921,4 @@ class TGSongAdjuster {
 		}
 		return newBeats;
 	}
-
-	private void addSilences(TGMeasure measure, List<TGBeat> beats) {
-		for (TGBeat beat : beats) {
-			this.manager.getMeasureManager().addBeat(measure, beat);
-		}
-	}
-
 }

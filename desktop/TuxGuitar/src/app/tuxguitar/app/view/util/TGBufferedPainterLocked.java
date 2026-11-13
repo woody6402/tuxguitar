@@ -17,10 +17,12 @@ public class TGBufferedPainterLocked {
 	private TGContext context;
 	private UIImage buffer;
 	private TGBufferedPainterHandle handle;
+	private boolean redrawPending;
 
 	public TGBufferedPainterLocked(TGContext context, TGBufferedPainterHandle handle) {
 		this.context = context;
 		this.handle = handle;
+		this.redrawPending = false;
 		this.handle.getPaintableControl().addDisposeListener(new UIDisposeListener() {
 			public void onDispose(UIDisposeEvent event) {
 				disposePaintBuffer();
@@ -71,9 +73,15 @@ public class TGBufferedPainterLocked {
 	}
 
 	public void redrawLater() {
+		if (this.redrawPending) {
+			return;
+		}
+
+		this.redrawPending = true;
 		final UICanvas paintableControl = this.handle.getPaintableControl();
 		TGSynchronizer.getInstance(this.context).executeLater(new Runnable() {
 			public void run() {
+				TGBufferedPainterLocked.this.redrawPending = false;
 				if(!paintableControl.isDisposed()) {
 					paintableControl.redraw();
 				}
